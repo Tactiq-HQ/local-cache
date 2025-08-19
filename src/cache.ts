@@ -179,7 +179,7 @@ export async function restoreCache(
     // Restore files from archive
     const cachePath = join(cacheDir, cacheFile.path);
     const baseDir = process.cwd(); // Extract to project root
-    const cmd = `tar -I pigz -xf "${cachePath}" -C "${baseDir}"`;
+    const cmd = `tar -I zstdmt -xf "${cachePath}" -C "${baseDir}"`;
 
     core.info(
         [
@@ -270,7 +270,7 @@ export async function saveCache(paths: string[], key: string): Promise<number> {
 
     // Build tar command with all expanded paths
     const pathsForTar = expandedPaths.map(p => `"${p}"`).join(' ');
-    const cmd = `tar -I pigz -cf "${cachePath}" -C "${baseDir}" ${pathsForTar}`;
+    const cmd = `tar -I zstdmt -cf "${cachePath}" -C "${baseDir}" ${pathsForTar}`;
 
     core.info(`Creating cache archive: ${cacheName}`);
 

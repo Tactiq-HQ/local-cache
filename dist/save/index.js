@@ -53488,7 +53488,7 @@ function restoreCache(paths, primaryKey, restoreKeys) {
         // Restore files from archive
         const cachePath = (0, path_1.join)(cacheDir, cacheFile.path);
         const baseDir = process.cwd(); // Extract to project root
-        const cmd = `tar -I pigz -xf "${cachePath}" -C "${baseDir}"`;
+        const cmd = `tar -I zstdmt -xf "${cachePath}" -C "${baseDir}"`;
         core.info([
             `Restoring cache: ${cacheFile.name}`,
             `Created: ${(_a = cacheFile.stats) === null || _a === void 0 ? void 0 : _a.mtime}`,
@@ -53568,7 +53568,7 @@ function saveCache(paths, key) {
         yield fs_1.default.promises.mkdir(cacheDir, { recursive: true });
         // Build tar command with all expanded paths
         const pathsForTar = expandedPaths.map(p => `"${p}"`).join(' ');
-        const cmd = `tar -I pigz -cf "${cachePath}" -C "${baseDir}" ${pathsForTar}`;
+        const cmd = `tar -I zstdmt -cf "${cachePath}" -C "${baseDir}" ${pathsForTar}`;
         core.info(`Creating cache archive: ${cacheName}`);
         const createCacheDirPromise = execAsync(cmd);
         try {
