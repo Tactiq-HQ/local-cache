@@ -127,6 +127,37 @@ function getCacheDirPath(): string {
     );
 }
 
+function getCommonBasePath(paths: string[]): string {
+    if (paths.length === 0) {
+        return "";
+    }
+    
+    if (paths.length === 1) {
+        return dirname(paths[0]);
+    }
+    
+    // Get all directory paths
+    const dirPaths = paths.map(p => dirname(p));
+    
+    // Split paths into components
+    const pathComponents = dirPaths.map(p => p.split(/[/\\]/));
+    
+    // Find the common prefix
+    const commonComponents: string[] = [];
+    const minLength = Math.min(...pathComponents.map(p => p.length));
+    
+    for (let i = 0; i < minLength; i++) {
+        const component = pathComponents[0][i];
+        if (pathComponents.every(p => p[i] === component)) {
+            commonComponents.push(component);
+        } else {
+            break;
+        }
+    }
+    
+    return commonComponents.join("/") || "/";
+}
+
 /**
  * Restores cache from keys
  *
@@ -142,7 +173,6 @@ export async function restoreCache(
 ): Promise<string | undefined> {
     checkKey(primaryKey);
     checkPaths(paths);
-    const path = paths[0];
 
     const cacheDir = getCacheDirPath();
 
@@ -173,7 +203,19 @@ export async function restoreCache(
 
     // Restore files from archive
     const cachePath = join(cacheDir, cacheFile.path);
-    const baseDir = dirname(path);
+    
+    // For multiple paths, use the common base directory
+    // For single path, use the original logic for backward compatibility
+    let baseDir: string;
+    if (paths.length === 1) {
+        baseDir = dirname(paths[0]);
+    } else {
+        baseDir = getCommonBasePath(paths);
+    }
+    
+    // Ensure the base directory exists before extraction
+    await fs.promises.mkdir(baseDir, { recursive: true });
+    
     const cmd = `tar -I pigz -xf ${cachePath} -C ${baseDir}`;
 
     core.info(
@@ -212,19 +254,33 @@ export async function saveCache(paths: string[], key: string): Promise<number> {
     checkPaths(paths);
     checkKey(key);
 
-    // @todo for now we only support a single path.
-    const path = paths[0];
-
     const cacheDir = getCacheDirPath();
     const cacheName = `${filenamify(key)}.tar.gz`;
     const cachePath = join(cacheDir, cacheName);
-    const baseDir = dirname(path);
-    const folderName = basename(path);
 
     // Ensure cache dir exists
     await fs.promises.mkdir(cacheDir, { recursive: true });
 
-    const cmd = `tar -I pigz -cf ${cachePath} -C ${baseDir} ${folderName}`;
+    // Handle single or multiple paths
+    let cmd: string;
+    if (paths.length === 1) {
+        // Single path - use existing logic for backward compatibility
+        const path = paths[0];
+        const baseDir = dirname(path);
+        const folderName = basename(path);
+        cmd = `tar -I pigz -cf ${cachePath} -C ${baseDir} ${folderName}`;
+    } else {
+        // Multiple paths - find common base and create relative paths
+        const commonBase = getCommonBasePath(paths);
+        const relativePaths = paths.map(p => {
+            const relativePath = p.startsWith(commonBase) 
+                ? p.substring(commonBase.length + 1) 
+                : basename(p);
+            return relativePath;
+        });
+        
+        cmd = `tar -I pigz -cf ${cachePath} -C ${commonBase} ${relativePaths.join(' ')}`;
+    }
 
     core.info(`Save cache: ${cacheName}`);
 
