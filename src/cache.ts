@@ -131,21 +131,21 @@ function getCommonBasePath(paths: string[]): string {
     if (paths.length === 0) {
         return "";
     }
-    
+
     if (paths.length === 1) {
         return dirname(paths[0]);
     }
-    
+
     // Get all directory paths
     const dirPaths = paths.map(p => dirname(p));
-    
+
     // Split paths into components
     const pathComponents = dirPaths.map(p => p.split(/[/\\]/));
-    
+
     // Find the common prefix
     const commonComponents: string[] = [];
     const minLength = Math.min(...pathComponents.map(p => p.length));
-    
+
     for (let i = 0; i < minLength; i++) {
         const component = pathComponents[0][i];
         if (pathComponents.every(p => p[i] === component)) {
@@ -154,7 +154,7 @@ function getCommonBasePath(paths: string[]): string {
             break;
         }
     }
-    
+
     return commonComponents.join("/") || "/";
 }
 
@@ -203,7 +203,7 @@ export async function restoreCache(
 
     // Restore files from archive
     const cachePath = join(cacheDir, cacheFile.path);
-    
+
     // For multiple paths, use the common base directory
     // For single path, use the original logic for backward compatibility
     let baseDir: string;
@@ -212,10 +212,10 @@ export async function restoreCache(
     } else {
         baseDir = getCommonBasePath(paths);
     }
-    
+
     // Ensure the base directory exists before extraction
     await fs.promises.mkdir(baseDir, { recursive: true });
-    
+
     const cmd = `tar -I pigz -xf ${cachePath} -C ${baseDir}`;
 
     core.info(
@@ -273,13 +273,15 @@ export async function saveCache(paths: string[], key: string): Promise<number> {
         // Multiple paths - find common base and create relative paths
         const commonBase = getCommonBasePath(paths);
         const relativePaths = paths.map(p => {
-            const relativePath = p.startsWith(commonBase) 
-                ? p.substring(commonBase.length + 1) 
+            const relativePath = p.startsWith(commonBase)
+                ? p.substring(commonBase.length + 1)
                 : basename(p);
             return relativePath;
         });
-        
-        cmd = `tar -I pigz -cf ${cachePath} -C ${commonBase} ${relativePaths.join(' ')}`;
+
+        cmd = `tar -I pigz -cf ${cachePath} -C ${commonBase} ${relativePaths.join(
+            " "
+        )}`;
     }
 
     core.info(`Save cache: ${cacheName}`);
