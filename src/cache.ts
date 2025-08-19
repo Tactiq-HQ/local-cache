@@ -142,6 +142,13 @@ export async function restoreCache(
 ): Promise<string | undefined> {
     checkKey(primaryKey);
     checkPaths(paths);
+    
+    // DEBUG: Show all paths received
+    core.info(`🔍 DEBUG - All paths received for restore:`);
+    paths.forEach((p, i) => core.info(`  [${i}]: ${p}`));
+    core.info(`⚠️  WARNING - Only processing first path: ${paths[0]}`);
+    core.info(`❌ IGNORED - ${paths.length - 1} other path(s): ${paths.slice(1).join(', ')}`);
+    
     const path = paths[0];
 
     const cacheDir = getCacheDirPath();
@@ -183,11 +190,36 @@ export async function restoreCache(
             `Size: ${prettyBytes(cacheFile.stats?.size || 0)}`
         ].join("\n")
     );
+    
+    // DEBUG: Show tar command and file system state
+    core.info(`🔧 DEBUG - Tar command: ${cmd}`);
+    core.info(`📁 DEBUG - Base directory: ${baseDir}`);
+    core.info(`📦 DEBUG - Cache file path: ${cachePath}`);
+    
+    // List files before restore
+    core.info(`📋 DEBUG - Files in base directory before restore:`);
+    const lsBeforeCmd = `ls -la ${baseDir}`;
+    try {
+        const { stdout: lsBefore } = await execAsync(lsBeforeCmd);
+        core.info(lsBefore);
+    } catch (err) {
+        core.warning(`Could not list directory ${baseDir}: ${err}`);
+    }
 
     const createCacheDirPromise = execAsync(cmd);
 
     try {
         await streamOutputUntilResolved(createCacheDirPromise);
+        
+        // DEBUG: List files after restore
+        core.info(`📋 DEBUG - Files in base directory after restore:`);
+        const lsAfterCmd = `ls -la ${baseDir}`;
+        try {
+            const { stdout: lsAfter } = await execAsync(lsAfterCmd);
+            core.info(lsAfter);
+        } catch (err) {
+            core.warning(`Could not list directory ${baseDir} after restore: ${err}`);
+        }
     } catch (err) {
         const skipFailure = core.getInput("skip-failure") || false;
         core.warning(`Error running tar: ${err}`);
@@ -212,6 +244,12 @@ export async function saveCache(paths: string[], key: string): Promise<number> {
     checkPaths(paths);
     checkKey(key);
 
+    // DEBUG: Show all paths received
+    core.info(`🔍 DEBUG - All paths received for save:`);
+    paths.forEach((p, i) => core.info(`  [${i}]: ${p}`));
+    core.info(`⚠️  WARNING - Only processing first path: ${paths[0]}`);
+    core.info(`❌ IGNORED - ${paths.length - 1} other path(s): ${paths.slice(1).join(', ')}`);
+
     // @todo for now we only support a single path.
     const path = paths[0];
 
@@ -228,10 +266,56 @@ export async function saveCache(paths: string[], key: string): Promise<number> {
 
     core.info(`Save cache: ${cacheName}`);
 
+    // DEBUG: Show tar command and file system state
+    core.info(`🔧 DEBUG - Tar command: ${cmd}`);
+    core.info(`📁 DEBUG - Base directory: ${baseDir}`);
+    core.info(`📂 DEBUG - Folder name to cache: ${folderName}`);
+    core.info(`📦 DEBUG - Cache file path: ${cachePath}`);
+
+    // List files before save to show what exists
+    core.info(`📋 DEBUG - Files in base directory before save:`);
+    const lsBeforeCmd = `ls -la ${baseDir}`;
+    try {
+        const { stdout: lsBefore } = await execAsync(lsBeforeCmd);
+        core.info(lsBefore);
+    } catch (err) {
+        core.warning(`Could not list directory ${baseDir}: ${err}`);
+    }
+
+    // Show what will be included in the tar
+    core.info(`📋 DEBUG - Files that will be cached (showing ${folderName} contents):`);
+    const lsTargetCmd = `ls -la ${join(baseDir, folderName)}`;
+    try {
+        const { stdout: lsTarget } = await execAsync(lsTargetCmd);
+        core.info(lsTarget);
+    } catch (err) {
+        core.warning(`Could not list target directory ${join(baseDir, folderName)}: ${err}`);
+    }
+
     const createCacheDirPromise = execAsync(cmd);
 
     try {
         await streamOutputUntilResolved(createCacheDirPromise);
+        
+        // DEBUG: Show cache file info after creation
+        core.info(`📦 DEBUG - Cache file created successfully`);
+        const statCmd = `ls -la ${cachePath}`;
+        try {
+            const { stdout: statResult } = await execAsync(statCmd);
+            core.info(`📦 DEBUG - Cache file details: ${statResult}`);
+        } catch (err) {
+            core.warning(`Could not stat cache file: ${err}`);
+        }
+
+        // Show cache file contents
+        core.info(`📦 DEBUG - Cache file contents:`);
+        const tarListCmd = `tar -I pigz -tf ${cachePath}`;
+        try {
+            const { stdout: tarContents } = await execAsync(tarListCmd);
+            core.info(tarContents);
+        } catch (err) {
+            core.warning(`Could not list cache file contents: ${err}`);
+        }
     } catch (err) {
         core.warning(`Error running tar: ${err}`);
         const skipFailure = core.getInput("skip-failure") || false;
