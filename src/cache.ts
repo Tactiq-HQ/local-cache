@@ -146,10 +146,11 @@ export async function restoreCache(
     // DEBUG: Show all paths received
     core.info(`🔍 DEBUG - All paths received for restore:`);
     paths.forEach((p, i) => core.info(`  [${i}]: ${p}`));
-    core.info(`⚠️  WARNING - Only processing first path: ${paths[0]}`);
-    core.info(`❌ IGNORED - ${paths.length - 1} other path(s): ${paths.slice(1).join(', ')}`);
+    core.info(`✅ DEBUG - Will restore cache for ALL ${paths.length} path(s)`);
     
-    const path = paths[0];
+    // We don't need to expand paths for restore since the cache was built with expanded paths
+    // The tar file contains all the necessary directories/files
+    // We'll extract to the project root (current working directory)
 
     const cacheDir = getCacheDirPath();
 
@@ -180,8 +181,8 @@ export async function restoreCache(
 
     // Restore files from archive
     const cachePath = join(cacheDir, cacheFile.path);
-    const baseDir = dirname(path);
-    const cmd = `tar -I pigz -xf ${cachePath} -C ${baseDir}`;
+    const baseDir = process.cwd(); // Extract to project root
+    const cmd = `tar -I pigz -xf "${cachePath}" -C "${baseDir}"`;
 
     core.info(
         [
@@ -193,17 +194,35 @@ export async function restoreCache(
     
     // DEBUG: Show tar command and file system state
     core.info(`🔧 DEBUG - Tar command: ${cmd}`);
-    core.info(`📁 DEBUG - Base directory: ${baseDir}`);
+    core.info(`📁 DEBUG - Base directory (project root): ${baseDir}`);
     core.info(`📦 DEBUG - Cache file path: ${cachePath}`);
     
-    // List files before restore
-    core.info(`📋 DEBUG - Files in base directory before restore:`);
-    const lsBeforeCmd = `ls -la ${baseDir}`;
+    // Show what's in the cache file
+    core.info(`📦 DEBUG - Cache file contents:`);
+    const tarListCmd = `tar -I pigz -tf "${cachePath}"`;
     try {
-        const { stdout: lsBefore } = await execAsync(lsBeforeCmd);
-        core.info(lsBefore);
+        const { stdout: tarContents } = await execAsync(tarListCmd);
+        core.info(tarContents);
     } catch (err) {
-        core.warning(`Could not list directory ${baseDir}: ${err}`);
+        core.warning(`Could not list cache file contents: ${err}`);
+    }
+    
+    // List files before restore for each expected path
+    core.info(`📋 DEBUG - Files before restore:`);
+    for (const expectedPath of paths) {
+        const fullPath = join(baseDir, expectedPath);
+        try {
+            const stat = await fs.promises.stat(fullPath);
+            if (stat.isDirectory()) {
+                const lsTargetCmd = `ls -la "${fullPath}"`;
+                const { stdout: lsTarget } = await execAsync(lsTargetCmd);
+                core.info(`  ${expectedPath} (exists):\n${lsTarget}`);
+            } else {
+                core.info(`  ${expectedPath} (file exists, ${stat.size} bytes)`);
+            }
+        } catch {
+            core.info(`  ${expectedPath} (not found - will be restored)`);
+        }
     }
 
     const createCacheDirPromise = execAsync(cmd);
@@ -211,14 +230,22 @@ export async function restoreCache(
     try {
         await streamOutputUntilResolved(createCacheDirPromise);
         
-        // DEBUG: List files after restore
-        core.info(`📋 DEBUG - Files in base directory after restore:`);
-        const lsAfterCmd = `ls -la ${baseDir}`;
-        try {
-            const { stdout: lsAfter } = await execAsync(lsAfterCmd);
-            core.info(lsAfter);
-        } catch (err) {
-            core.warning(`Could not list directory ${baseDir} after restore: ${err}`);
+        // DEBUG: List files after restore for each expected path
+        core.info(`📋 DEBUG - Files after restore:`);
+        for (const expectedPath of paths) {
+            const fullPath = join(baseDir, expectedPath);
+            try {
+                const stat = await fs.promises.stat(fullPath);
+                if (stat.isDirectory()) {
+                    const lsTargetCmd = `ls -la "${fullPath}"`;
+                    const { stdout: lsTarget } = await execAsync(lsTargetCmd);
+                    core.info(`  ${expectedPath} (restored successfully):\n${lsTarget}`);
+                } else {
+                    core.info(`  ${expectedPath} (file restored, ${stat.size} bytes)`);
+                }
+            } catch {
+                core.info(`  ${expectedPath} (still not found - may not have been in cache)`);
+            }
         }
     } catch (err) {
         const skipFailure = core.getInput("skip-failure") || false;
@@ -247,49 +274,93 @@ export async function saveCache(paths: string[], key: string): Promise<number> {
     // DEBUG: Show all paths received
     core.info(`🔍 DEBUG - All paths received for save:`);
     paths.forEach((p, i) => core.info(`  [${i}]: ${p}`));
-    core.info(`⚠️  WARNING - Only processing first path: ${paths[0]}`);
-    core.info(`❌ IGNORED - ${paths.length - 1} other path(s): ${paths.slice(1).join(', ')}`);
 
-    // @todo for now we only support a single path.
-    const path = paths[0];
+    // Expand all paths using fast-glob to handle patterns like packages/*/node_modules
+    core.info(`📂 DEBUG - Expanding paths with glob patterns...`);
+    const expandedPaths: string[] = [];
+    
+    for (const pathPattern of paths) {
+        try {
+            // Use fast-glob to expand patterns and check if paths exist
+            const matches = await fg(pathPattern, {
+                onlyDirectories: false, // Include both files and directories
+                suppressErrors: true,   // Don't throw on permission errors
+                followSymbolicLinks: false
+            });
+            
+            if (matches.length > 0) {
+                expandedPaths.push(...matches);
+                core.info(`  ✅ ${pathPattern} -> found ${matches.length} match(es): ${matches.join(', ')}`);
+            } else {
+                // If no glob matches, check if it's a literal path that exists
+                try {
+                    const stat = await fs.promises.stat(pathPattern);
+                    expandedPaths.push(pathPattern);
+                    core.info(`  ✅ ${pathPattern} -> exists as ${stat.isDirectory() ? 'directory' : 'file'}`);
+                } catch {
+                    core.info(`  ⚠️  ${pathPattern} -> not found (skipping)`);
+                }
+            }
+        } catch (err) {
+            core.warning(`Error expanding path ${pathPattern}: ${err}`);
+        }
+    }
+
+    if (expandedPaths.length === 0) {
+        throw new Error("No valid paths found to cache after expansion");
+    }
+
+    core.info(`📦 DEBUG - Final paths to cache (${expandedPaths.length} total):`);
+    expandedPaths.forEach((p, i) => core.info(`  [${i}]: ${p}`));
 
     const cacheDir = getCacheDirPath();
     const cacheName = `${filenamify(key)}.tar.gz`;
     const cachePath = join(cacheDir, cacheName);
-    const baseDir = dirname(path);
-    const folderName = basename(path);
+    
+    // Use current working directory as base for all relative paths
+    const baseDir = process.cwd();
 
     // Ensure cache dir exists
     await fs.promises.mkdir(cacheDir, { recursive: true });
 
-    const cmd = `tar -I pigz -cf ${cachePath} -C ${baseDir} ${folderName}`;
+    // Build tar command with all expanded paths
+    const pathsForTar = expandedPaths.map(p => `"${p}"`).join(' ');
+    const cmd = `tar -I pigz -cf "${cachePath}" -C "${baseDir}" ${pathsForTar}`;
 
     core.info(`Save cache: ${cacheName}`);
-
+    
     // DEBUG: Show tar command and file system state
     core.info(`🔧 DEBUG - Tar command: ${cmd}`);
     core.info(`📁 DEBUG - Base directory: ${baseDir}`);
-    core.info(`📂 DEBUG - Folder name to cache: ${folderName}`);
     core.info(`📦 DEBUG - Cache file path: ${cachePath}`);
-
+    core.info(`📂 DEBUG - Paths to be cached: ${expandedPaths.join(', ')}`);
+    
     // List files before save to show what exists
     core.info(`📋 DEBUG - Files in base directory before save:`);
-    const lsBeforeCmd = `ls -la ${baseDir}`;
+    const lsBeforeCmd = `ls -la "${baseDir}"`;
     try {
         const { stdout: lsBefore } = await execAsync(lsBeforeCmd);
         core.info(lsBefore);
     } catch (err) {
         core.warning(`Could not list directory ${baseDir}: ${err}`);
     }
-
-    // Show what will be included in the tar
-    core.info(`📋 DEBUG - Files that will be cached (showing ${folderName} contents):`);
-    const lsTargetCmd = `ls -la ${join(baseDir, folderName)}`;
-    try {
-        const { stdout: lsTarget } = await execAsync(lsTargetCmd);
-        core.info(lsTarget);
-    } catch (err) {
-        core.warning(`Could not list target directory ${join(baseDir, folderName)}: ${err}`);
+    
+    // Show what will be included for each path
+    for (const targetPath of expandedPaths) {
+        core.info(`📋 DEBUG - Contents of ${targetPath}:`);
+        const fullPath = join(baseDir, targetPath);
+        try {
+            const stat = await fs.promises.stat(fullPath);
+            if (stat.isDirectory()) {
+                const lsTargetCmd = `ls -la "${fullPath}"`;
+                const { stdout: lsTarget } = await execAsync(lsTargetCmd);
+                core.info(lsTarget);
+            } else {
+                core.info(`  File: ${targetPath} (${stat.size} bytes)`);
+            }
+        } catch (err) {
+            core.warning(`Could not inspect ${targetPath}: ${err}`);
+        }
     }
 
     const createCacheDirPromise = execAsync(cmd);
