@@ -143,10 +143,7 @@ export async function restoreCache(
     checkKey(primaryKey);
     checkPaths(paths);
     
-    // DEBUG: Show all paths received
-    core.info(`🔍 DEBUG - All paths received for restore:`);
-    paths.forEach((p, i) => core.info(`  [${i}]: ${p}`));
-    core.info(`✅ DEBUG - Will restore cache for ALL ${paths.length} path(s)`);
+    core.info(`Restoring cache for ${paths.length} path pattern(s): ${paths.join(', ')}`);
     
     // We don't need to expand paths for restore since the cache was built with expanded paths
     // The tar file contains all the necessary directories/files
@@ -192,61 +189,14 @@ export async function restoreCache(
         ].join("\n")
     );
     
-    // DEBUG: Show tar command and file system state
-    core.info(`🔧 DEBUG - Tar command: ${cmd}`);
-    core.info(`📁 DEBUG - Base directory (project root): ${baseDir}`);
-    core.info(`📦 DEBUG - Cache file path: ${cachePath}`);
-    
-    // Show what's in the cache file
-    core.info(`📦 DEBUG - Cache file contents:`);
-    const tarListCmd = `tar -I pigz -tf "${cachePath}"`;
-    try {
-        const { stdout: tarContents } = await execAsync(tarListCmd);
-        core.info(tarContents);
-    } catch (err) {
-        core.warning(`Could not list cache file contents: ${err}`);
-    }
-    
-    // List files before restore for each expected path
-    core.info(`📋 DEBUG - Files before restore:`);
-    for (const expectedPath of paths) {
-        const fullPath = join(baseDir, expectedPath);
-        try {
-            const stat = await fs.promises.stat(fullPath);
-            if (stat.isDirectory()) {
-                const lsTargetCmd = `ls -la "${fullPath}"`;
-                const { stdout: lsTarget } = await execAsync(lsTargetCmd);
-                core.info(`  ${expectedPath} (exists):\n${lsTarget}`);
-            } else {
-                core.info(`  ${expectedPath} (file exists, ${stat.size} bytes)`);
-            }
-        } catch {
-            core.info(`  ${expectedPath} (not found - will be restored)`);
-        }
-    }
+    core.info(`Extracting cache to project root...`);
 
     const createCacheDirPromise = execAsync(cmd);
 
     try {
         await streamOutputUntilResolved(createCacheDirPromise);
         
-        // DEBUG: List files after restore for each expected path
-        core.info(`📋 DEBUG - Files after restore:`);
-        for (const expectedPath of paths) {
-            const fullPath = join(baseDir, expectedPath);
-            try {
-                const stat = await fs.promises.stat(fullPath);
-                if (stat.isDirectory()) {
-                    const lsTargetCmd = `ls -la "${fullPath}"`;
-                    const { stdout: lsTarget } = await execAsync(lsTargetCmd);
-                    core.info(`  ${expectedPath} (restored successfully):\n${lsTarget}`);
-                } else {
-                    core.info(`  ${expectedPath} (file restored, ${stat.size} bytes)`);
-                }
-            } catch {
-                core.info(`  ${expectedPath} (still not found - may not have been in cache)`);
-            }
-        }
+        core.info(`Cache restored successfully`);
     } catch (err) {
         const skipFailure = core.getInput("skip-failure") || false;
         core.warning(`Error running tar: ${err}`);
@@ -271,12 +221,8 @@ export async function saveCache(paths: string[], key: string): Promise<number> {
     checkPaths(paths);
     checkKey(key);
 
-    // DEBUG: Show all paths received
-    core.info(`🔍 DEBUG - All paths received for save:`);
-    paths.forEach((p, i) => core.info(`  [${i}]: ${p}`));
-
     // Expand all paths using fast-glob to handle patterns like packages/*/node_modules
-    core.info(`📂 DEBUG - Expanding paths with glob patterns...`);
+    core.info(`Expanding ${paths.length} path pattern(s)...`);
     const expandedPaths: string[] = [];
     
     for (const pathPattern of paths) {
@@ -290,15 +236,15 @@ export async function saveCache(paths: string[], key: string): Promise<number> {
             
             if (matches.length > 0) {
                 expandedPaths.push(...matches);
-                core.info(`  ✅ ${pathPattern} -> found ${matches.length} match(es): ${matches.join(', ')}`);
+                core.info(`${pathPattern} -> ${matches.length} match(es)`);
             } else {
                 // If no glob matches, check if it's a literal path that exists
                 try {
                     const stat = await fs.promises.stat(pathPattern);
                     expandedPaths.push(pathPattern);
-                    core.info(`  ✅ ${pathPattern} -> exists as ${stat.isDirectory() ? 'directory' : 'file'}`);
+                    core.info(`${pathPattern} -> found (${stat.isDirectory() ? 'directory' : 'file'})`);
                 } catch {
-                    core.info(`  ⚠️  ${pathPattern} -> not found (skipping)`);
+                    core.info(`${pathPattern} -> not found (skipping)`);
                 }
             }
         } catch (err) {
@@ -310,8 +256,7 @@ export async function saveCache(paths: string[], key: string): Promise<number> {
         throw new Error("No valid paths found to cache after expansion");
     }
 
-    core.info(`📦 DEBUG - Final paths to cache (${expandedPaths.length} total):`);
-    expandedPaths.forEach((p, i) => core.info(`  [${i}]: ${p}`));
+    core.info(`Caching ${expandedPaths.length} path(s): ${expandedPaths.join(', ')}`);
 
     const cacheDir = getCacheDirPath();
     const cacheName = `${filenamify(key)}.tar.gz`;
@@ -327,65 +272,19 @@ export async function saveCache(paths: string[], key: string): Promise<number> {
     const pathsForTar = expandedPaths.map(p => `"${p}"`).join(' ');
     const cmd = `tar -I pigz -cf "${cachePath}" -C "${baseDir}" ${pathsForTar}`;
 
-    core.info(`Save cache: ${cacheName}`);
-    
-    // DEBUG: Show tar command and file system state
-    core.info(`🔧 DEBUG - Tar command: ${cmd}`);
-    core.info(`📁 DEBUG - Base directory: ${baseDir}`);
-    core.info(`📦 DEBUG - Cache file path: ${cachePath}`);
-    core.info(`📂 DEBUG - Paths to be cached: ${expandedPaths.join(', ')}`);
-    
-    // List files before save to show what exists
-    core.info(`📋 DEBUG - Files in base directory before save:`);
-    const lsBeforeCmd = `ls -la "${baseDir}"`;
-    try {
-        const { stdout: lsBefore } = await execAsync(lsBeforeCmd);
-        core.info(lsBefore);
-    } catch (err) {
-        core.warning(`Could not list directory ${baseDir}: ${err}`);
-    }
-    
-    // Show what will be included for each path
-    for (const targetPath of expandedPaths) {
-        core.info(`📋 DEBUG - Contents of ${targetPath}:`);
-        const fullPath = join(baseDir, targetPath);
-        try {
-            const stat = await fs.promises.stat(fullPath);
-            if (stat.isDirectory()) {
-                const lsTargetCmd = `ls -la "${fullPath}"`;
-                const { stdout: lsTarget } = await execAsync(lsTargetCmd);
-                core.info(lsTarget);
-            } else {
-                core.info(`  File: ${targetPath} (${stat.size} bytes)`);
-            }
-        } catch (err) {
-            core.warning(`Could not inspect ${targetPath}: ${err}`);
-        }
-    }
+    core.info(`Creating cache archive: ${cacheName}`);
 
     const createCacheDirPromise = execAsync(cmd);
 
     try {
         await streamOutputUntilResolved(createCacheDirPromise);
-        
-        // DEBUG: Show cache file info after creation
-        core.info(`📦 DEBUG - Cache file created successfully`);
-        const statCmd = `ls -la ${cachePath}`;
+                
+        // Show final cache file size
         try {
-            const { stdout: statResult } = await execAsync(statCmd);
-            core.info(`📦 DEBUG - Cache file details: ${statResult}`);
+            const stat = await fs.promises.stat(cachePath);
+            core.info(`Cache saved successfully (${prettyBytes(stat.size)})`);
         } catch (err) {
-            core.warning(`Could not stat cache file: ${err}`);
-        }
-
-        // Show cache file contents
-        core.info(`📦 DEBUG - Cache file contents:`);
-        const tarListCmd = `tar -I pigz -tf ${cachePath}`;
-        try {
-            const { stdout: tarContents } = await execAsync(tarListCmd);
-            core.info(tarContents);
-        } catch (err) {
-            core.warning(`Could not list cache file contents: ${err}`);
+            core.info(`Cache saved successfully`);
         }
     } catch (err) {
         core.warning(`Error running tar: ${err}`);
