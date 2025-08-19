@@ -53470,7 +53470,7 @@ function saveCache(paths, key) {
         }
         core.info(`Caching ${expandedPaths.length} path(s): ${expandedPaths.join(', ')}`);
         const cacheDir = getCacheDirPath();
-        const cacheName = `${(0, filenamify_1.default)(key)}.tar.gz`;
+        const cacheName = `${(0, filenamify_1.default)(key)}.tar.zst`;
         const cachePath = (0, path_1.join)(cacheDir, cacheName);
         // Use current working directory as base for all relative paths
         const baseDir = process.cwd();

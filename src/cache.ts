@@ -259,7 +259,7 @@ export async function saveCache(paths: string[], key: string): Promise<number> {
     core.info(`Caching ${expandedPaths.length} path(s): ${expandedPaths.join(', ')}`);
 
     const cacheDir = getCacheDirPath();
-    const cacheName = `${filenamify(key)}.tar.gz`;
+    const cacheName = `${filenamify(key)}.tar.zst`;
     const cachePath = join(cacheDir, cacheName);
     
     // Use current working directory as base for all relative paths
