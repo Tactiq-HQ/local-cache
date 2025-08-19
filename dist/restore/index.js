@@ -53372,7 +53372,10 @@ function restoreCache(paths, primaryKey, restoreKeys) {
     return __awaiter(this, void 0, void 0, function* () {
         checkKey(primaryKey);
         checkPaths(paths);
-        const path = paths[0];
+        core.info(`Restoring cache for ${paths.length} path pattern(s): ${paths.join(', ')}`);
+        // We don't need to expand paths for restore since the cache was built with expanded paths
+        // The tar file contains all the necessary directories/files
+        // We'll extract to the project root (current working directory)
         const cacheDir = getCacheDirPath();
         // 1. check if we find any dir that matches our keys from restoreKeys
         const filenameMatchers = (Array.isArray(restoreKeys) && restoreKeys.length
@@ -53394,16 +53397,18 @@ function restoreCache(paths, primaryKey, restoreKeys) {
         const { key, cacheFile } = result;
         // Restore files from archive
         const cachePath = (0, path_1.join)(cacheDir, cacheFile.path);
-        const baseDir = (0, path_1.dirname)(path);
-        const cmd = `tar -I pigz -xf ${cachePath} -C ${baseDir}`;
+        const baseDir = process.cwd(); // Extract to project root
+        const cmd = `tar -I zstdmt -xf "${cachePath}" -C "${baseDir}"`;
         core.info([
             `Restoring cache: ${cacheFile.name}`,
             `Created: ${(_a = cacheFile.stats) === null || _a === void 0 ? void 0 : _a.mtime}`,
             `Size: ${(0, pretty_bytes_1.default)(((_b = cacheFile.stats) === null || _b === void 0 ? void 0 : _b.size) || 0)}`
         ].join("\n"));
+        core.info(`Extracting cache to project root...`);
         const createCacheDirPromise = execAsync(cmd);
         try {
             yield streamOutputUntilResolved(createCacheDirPromise);
+            core.info(`Cache restored successfully`);
         }
         catch (err) {
             const skipFailure = core.getInput("skip-failure") || false;
@@ -53429,20 +53434,63 @@ function saveCache(paths, key) {
     return __awaiter(this, void 0, void 0, function* () {
         checkPaths(paths);
         checkKey(key);
-        // @todo for now we only support a single path.
-        const path = paths[0];
+        // Expand all paths using fast-glob to handle patterns like packages/*/node_modules
+        core.info(`Expanding ${paths.length} path pattern(s)...`);
+        const expandedPaths = [];
+        for (const pathPattern of paths) {
+            try {
+                // Use fast-glob to expand patterns and check if paths exist
+                const matches = yield (0, fast_glob_1.default)(pathPattern, {
+                    onlyDirectories: false,
+                    suppressErrors: true,
+                    followSymbolicLinks: false
+                });
+                if (matches.length > 0) {
+                    expandedPaths.push(...matches);
+                    core.info(`${pathPattern} -> ${matches.length} match(es)`);
+                }
+                else {
+                    // If no glob matches, check if it's a literal path that exists
+                    try {
+                        const stat = yield fs_1.default.promises.stat(pathPattern);
+                        expandedPaths.push(pathPattern);
+                        core.info(`${pathPattern} -> found (${stat.isDirectory() ? 'directory' : 'file'})`);
+                    }
+                    catch (_a) {
+                        core.info(`${pathPattern} -> not found (skipping)`);
+                    }
+                }
+            }
+            catch (err) {
+                core.warning(`Error expanding path ${pathPattern}: ${err}`);
+            }
+        }
+        if (expandedPaths.length === 0) {
+            throw new Error("No valid paths found to cache after expansion");
+        }
+        core.info(`Caching ${expandedPaths.length} path(s): ${expandedPaths.join(', ')}`);
         const cacheDir = getCacheDirPath();
-        const cacheName = `${(0, filenamify_1.default)(key)}.tar.gz`;
+        const cacheName = `${(0, filenamify_1.default)(key)}.tar.zst`;
         const cachePath = (0, path_1.join)(cacheDir, cacheName);
-        const baseDir = (0, path_1.dirname)(path);
-        const folderName = (0, path_1.basename)(path);
+        // Use current working directory as base for all relative paths
+        const baseDir = process.cwd();
         // Ensure cache dir exists
         yield fs_1.default.promises.mkdir(cacheDir, { recursive: true });
-        const cmd = `tar -I pigz -cf ${cachePath} -C ${baseDir} ${folderName}`;
-        core.info(`Save cache: ${cacheName}`);
+        // Build tar command with all expanded paths
+        const pathsForTar = expandedPaths.map(p => `"${p}"`).join(' ');
+        const cmd = `tar -I zstdmt -cf "${cachePath}" -C "${baseDir}" ${pathsForTar}`;
+        core.info(`Creating cache archive: ${cacheName}`);
         const createCacheDirPromise = execAsync(cmd);
         try {
             yield streamOutputUntilResolved(createCacheDirPromise);
+            // Show final cache file size
+            try {
+                const stat = yield fs_1.default.promises.stat(cachePath);
+                core.info(`Cache saved successfully (${(0, pretty_bytes_1.default)(stat.size)})`);
+            }
+            catch (err) {
+                core.info(`Cache saved successfully`);
+            }
         }
         catch (err) {
             core.warning(`Error running tar: ${err}`);

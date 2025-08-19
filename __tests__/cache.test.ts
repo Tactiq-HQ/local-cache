@@ -24,7 +24,7 @@ describe("save and restore files", () => {
     test("creates archive file", async () => {
         await cache.saveCache([FIXTURES_DIR], "save-test");
         await fs.promises.access(
-            resolve(CACHE_DIR, GITHUB_REPOSITORY, "save-test.tar.gz"),
+            resolve(CACHE_DIR, GITHUB_REPOSITORY, "save-test.tar.zst"),
             fs.constants.R_OK | fs.constants.W_OK
         );
     });
