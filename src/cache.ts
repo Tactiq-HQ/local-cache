@@ -3,9 +3,10 @@ import { exec, PromiseWithChild } from "child_process";
 import fg from "fast-glob";
 import filenamify from "filenamify";
 import fs from "fs";
-import { basename, dirname, join } from "path";
+import { join } from "path";
 import prettyBytes from "pretty-bytes";
 import { promisify } from "util";
+import { v4 as uuidv4 } from "uuid";
 
 const execAsync = promisify(exec);
 
@@ -142,9 +143,13 @@ export async function restoreCache(
 ): Promise<string | undefined> {
     checkKey(primaryKey);
     checkPaths(paths);
-    
-    core.info(`Restoring cache for ${paths.length} path pattern(s): ${paths.join(', ')}`);
-    
+
+    core.info(
+        `Restoring cache for ${paths.length} path pattern(s): ${paths.join(
+            ", "
+        )}`
+    );
+
     // We don't need to expand paths for restore since the cache was built with expanded paths
     // The tar file contains all the necessary directories/files
     // We'll extract to the project root (current working directory)
@@ -188,14 +193,14 @@ export async function restoreCache(
             `Size: ${prettyBytes(cacheFile.stats?.size || 0)}`
         ].join("\n")
     );
-    
+
     core.info(`Extracting cache to project root...`);
 
     const createCacheDirPromise = execAsync(cmd);
 
     try {
         await streamOutputUntilResolved(createCacheDirPromise);
-        
+
         core.info(`Cache restored successfully`);
     } catch (err) {
         const skipFailure = core.getInput("skip-failure") || false;
@@ -224,16 +229,16 @@ export async function saveCache(paths: string[], key: string): Promise<number> {
     // Expand all paths using fast-glob to handle patterns like packages/*/node_modules
     core.info(`Expanding ${paths.length} path pattern(s)...`);
     const expandedPaths: string[] = [];
-    
+
     for (const pathPattern of paths) {
         try {
             // Use fast-glob to expand patterns and check if paths exist
             const matches = await fg(pathPattern, {
                 onlyDirectories: false, // Include both files and directories
-                suppressErrors: true,   // Don't throw on permission errors
+                suppressErrors: true, // Don't throw on permission errors
                 followSymbolicLinks: false
             });
-            
+
             if (matches.length > 0) {
                 expandedPaths.push(...matches);
                 core.info(`${pathPattern} -> ${matches.length} match(es)`);
@@ -242,7 +247,11 @@ export async function saveCache(paths: string[], key: string): Promise<number> {
                 try {
                     const stat = await fs.promises.stat(pathPattern);
                     expandedPaths.push(pathPattern);
-                    core.info(`${pathPattern} -> found (${stat.isDirectory() ? 'directory' : 'file'})`);
+                    core.info(
+                        `${pathPattern} -> found (${
+                            stat.isDirectory() ? "directory" : "file"
+                        })`
+                    );
                 } catch {
                     core.info(`${pathPattern} -> not found (skipping)`);
                 }
@@ -256,12 +265,15 @@ export async function saveCache(paths: string[], key: string): Promise<number> {
         throw new Error("No valid paths found to cache after expansion");
     }
 
-    core.info(`Caching ${expandedPaths.length} path(s): ${expandedPaths.join(', ')}`);
+    core.info(
+        `Caching ${expandedPaths.length} path(s): ${expandedPaths.join(", ")}`
+    );
 
     const cacheDir = getCacheDirPath();
     const cacheName = `${filenamify(key)}.tar.zst`;
+    const temporaryCachePath = join(cacheDir, `${uuidv4()}.tmp`);
     const cachePath = join(cacheDir, cacheName);
-    
+
     // Use current working directory as base for all relative paths
     const baseDir = process.cwd();
 
@@ -269,8 +281,8 @@ export async function saveCache(paths: string[], key: string): Promise<number> {
     await fs.promises.mkdir(cacheDir, { recursive: true });
 
     // Build tar command with all expanded paths
-    const pathsForTar = expandedPaths.map(p => `"${p}"`).join(' ');
-    const cmd = `tar -I zstdmt -cf "${cachePath}" -C "${baseDir}" ${pathsForTar}`;
+    const pathsForTar = expandedPaths.map(p => `"${p}"`).join(" ");
+    const cmd = `tar -I zstdmt -cf "${temporaryCachePath}" -C "${baseDir}" ${pathsForTar}`;
 
     core.info(`Creating cache archive: ${cacheName}`);
 
@@ -278,7 +290,11 @@ export async function saveCache(paths: string[], key: string): Promise<number> {
 
     try {
         await streamOutputUntilResolved(createCacheDirPromise);
-                
+
+        // Atomically move the temporary file to the final location
+        core.info(`Atomically moving cache file to final location...`);
+        await fs.promises.rename(temporaryCachePath, cachePath);
+
         // Show final cache file size
         try {
             const stat = await fs.promises.stat(cachePath);
@@ -287,10 +303,16 @@ export async function saveCache(paths: string[], key: string): Promise<number> {
             core.info(`Cache saved successfully`);
         }
     } catch (err) {
-        core.warning(`Error running tar: ${err}`);
+        core.warning(`Error creating cache: ${err}`);
         const skipFailure = core.getInput("skip-failure") || false;
-        const cleanBadFile = execAsync(`rm -rf ${cachePath}`);
-        await streamOutputUntilResolved(cleanBadFile);
+
+        // Clean up temporary file if it exists
+        try {
+            await fs.promises.unlink(temporaryCachePath);
+        } catch (cleanupErr) {
+            // Ignore cleanup errors - file might not exist
+        }
+
         if (!skipFailure) {
             throw err;
         }
