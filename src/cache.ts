@@ -3,7 +3,7 @@ import { exec, PromiseWithChild } from "child_process";
 import fg from "fast-glob";
 import filenamify from "filenamify";
 import fs from "fs";
-import { join } from "path";
+import { join, relative } from "path";
 import prettyBytes from "pretty-bytes";
 import { promisify } from "util";
 import { v4 as uuidv4 } from "uuid";
@@ -184,7 +184,7 @@ export async function restoreCache(
     // Restore files from archive
     const cachePath = join(cacheDir, cacheFile.path);
     const baseDir = process.cwd(); // Extract to project root
-    const cmd = `tar -I zstdmt -xf "${cachePath}" -C "${baseDir}"`;
+    const cmd = `tar -xf "${cachePath}" -C "${baseDir}"`;
 
     core.info(
         [
@@ -270,7 +270,7 @@ export async function saveCache(paths: string[], key: string): Promise<number> {
     );
 
     const cacheDir = getCacheDirPath();
-    const cacheName = `${filenamify(key)}.tar.zst`;
+    const cacheName = `${filenamify(key)}.tar`;
     const temporaryCachePath = join(cacheDir, `${uuidv4()}.tmp`);
     const cachePath = join(cacheDir, cacheName);
 
@@ -280,9 +280,9 @@ export async function saveCache(paths: string[], key: string): Promise<number> {
     // Ensure cache dir exists
     await fs.promises.mkdir(cacheDir, { recursive: true });
 
-    // Build tar command with all expanded paths
-    const pathsForTar = expandedPaths.map(p => `"${p}"`).join(" ");
-    const cmd = `tar -I zstdmt -cf "${temporaryCachePath}" -C "${baseDir}" ${pathsForTar}`;
+    // Build tar command with all expanded paths converted to relative paths
+    const pathsForTar = expandedPaths.map(p => `"${relative(baseDir, p)}"`).join(" ");
+    const cmd = `tar -cf "${temporaryCachePath}" -C "${baseDir}" ${pathsForTar}`;
 
     core.info(`Creating cache archive: ${cacheName}`);
 

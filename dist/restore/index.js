@@ -52418,7 +52418,7 @@ function restoreCache(paths, primaryKey, restoreKeys) {
         // Restore files from archive
         const cachePath = (0, path_1.join)(cacheDir, cacheFile.path);
         const baseDir = process.cwd(); // Extract to project root
-        const cmd = `tar -I zstdmt -xf "${cachePath}" -C "${baseDir}"`;
+        const cmd = `tar -xf "${cachePath}" -C "${baseDir}"`;
         core.info([
             `Restoring cache: ${cacheFile.name}`,
             `Created: ${(_a = cacheFile.stats) === null || _a === void 0 ? void 0 : _a.mtime}`,
@@ -52490,16 +52490,16 @@ function saveCache(paths, key) {
         }
         core.info(`Caching ${expandedPaths.length} path(s): ${expandedPaths.join(", ")}`);
         const cacheDir = getCacheDirPath();
-        const cacheName = `${(0, filenamify_1.default)(key)}.tar.zst`;
+        const cacheName = `${(0, filenamify_1.default)(key)}.tar`;
         const temporaryCachePath = (0, path_1.join)(cacheDir, `${(0, uuid_1.v4)()}.tmp`);
         const cachePath = (0, path_1.join)(cacheDir, cacheName);
         // Use current working directory as base for all relative paths
         const baseDir = process.cwd();
         // Ensure cache dir exists
         yield fs_1.default.promises.mkdir(cacheDir, { recursive: true });
-        // Build tar command with all expanded paths
-        const pathsForTar = expandedPaths.map(p => `"${p}"`).join(" ");
-        const cmd = `tar -I zstdmt -cf "${temporaryCachePath}" -C "${baseDir}" ${pathsForTar}`;
+        // Build tar command with all expanded paths converted to relative paths
+        const pathsForTar = expandedPaths.map(p => `"${(0, path_1.relative)(baseDir, p)}"`).join(" ");
+        const cmd = `tar -cf "${temporaryCachePath}" -C "${baseDir}" ${pathsForTar}`;
         core.info(`Creating cache archive: ${cacheName}`);
         const createCacheDirPromise = execAsync(cmd);
         try {
