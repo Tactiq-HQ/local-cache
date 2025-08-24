@@ -52589,7 +52589,7 @@ function saveCache(paths, key) {
         yield fs_1.default.promises.mkdir(cacheDir, { recursive: true });
         // Build tar command with all expanded paths
         const pathsForTar = expandedPaths.map(p => `"${p}"`).join(" ");
-        const cmd = `tar -I zstdmt -cf "${temporaryCachePath}" -C "${baseDir}" ${pathsForTar}`;
+        const cmd = `tar -I 'zstdmt -1' -cf "${temporaryCachePath}" -C "${baseDir}" ${pathsForTar}`;
         core.info(`Creating cache archive: ${cacheName}`);
         const createCacheDirPromise = execAsync(cmd);
         try {

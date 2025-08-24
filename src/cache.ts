@@ -282,7 +282,7 @@ export async function saveCache(paths: string[], key: string): Promise<number> {
 
     // Build tar command with all expanded paths
     const pathsForTar = expandedPaths.map(p => `"${p}"`).join(" ");
-    const cmd = `tar -I zstdmt -cf "${temporaryCachePath}" -C "${baseDir}" ${pathsForTar}`;
+    const cmd = `tar -I 'zstdmt -1' -cf "${temporaryCachePath}" -C "${baseDir}" ${pathsForTar}`;
 
     core.info(`Creating cache archive: ${cacheName}`);
 
